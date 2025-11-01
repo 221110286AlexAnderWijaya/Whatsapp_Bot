@@ -15,7 +15,7 @@ jobs:
 
     # --- Basic CI: Validate Docker Compose ---
     - name: Validate Docker Compose
-      run: docker-compose -f docker-compose.yml config
+      run: docker compose -f docker-compose.yml config
 
     # --- CD: Deploy to VPS via SSH ---
     - name: Deploy via SSH
