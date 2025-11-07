@@ -11,3 +11,5 @@ mysql-data/
 
 # n8n data
 n8n-processor-data/
+n8n-processor-data/database.sqlite
+n8n-processor-data/database.sqlite
