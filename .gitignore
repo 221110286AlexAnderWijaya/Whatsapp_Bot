@@ -1,0 +1,13 @@
+# Environments
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Databases
+*.sqlite
+mysql-data/
+
+# n8n data
+n8n-processor-data/
