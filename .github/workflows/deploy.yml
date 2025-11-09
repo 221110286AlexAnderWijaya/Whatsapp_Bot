@@ -1,36 +1,49 @@
-name: Deploy Microservices
+# Nama workflow Anda
+name: Deploy to VPS
 
-# Trigger on push to the 'master' branch (since your branch is master)
+# Kapan workflow ini berjalan:
+# Hanya saat Anda melakukan 'push' ke branch 'master'
 on:
   push:
     branches: [ master ]
 
 jobs:
+  # Nama job-nya (bisa apa saja)
   deploy:
-    runs-on: ubuntu-latest # Use a Linux runner
+    # Menggunakan server Ubuntu terbaru dari GitHub
+    runs-on: ubuntu-latest
 
     steps:
+    # Langkah 1: Mengunduh kode Anda dari GitHub ke server 'runner' GitHub
     - name: Checkout code
-      uses: actions/checkout@v4 # Download your repository code
+      uses: actions/checkout@v4
 
-    # --- Basic CI: Validate Docker Compose ---
+    # Langkah 2 (CI Sederhana): Memvalidasi file docker-compose.yml
     - name: Validate Docker Compose
       run: docker compose -f docker-compose.yml config
-
-    # --- CD: Deploy to VPS via SSH ---
-    - name: Deploy via SSH
+    
+    # Langkah 3 (CI Sederhana): Memeriksa sintaks Python di folder backend
+    - name: Install Python and dependencies
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Sesuaikan dengan versi Python Anda
+    - name: Lint with Flake8 (opsional)
+      run: |
+        pip install flake8
+        flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+    # Langkah 4 (CD): Login ke VPS Anda dan jalankan perintah
+    - name: Deploy to VPS via SSH
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ secrets.VPS_HOST }}          # Your VPS IP Address
-        username: ${{ secrets.VPS_USERNAME }}    # Your SSH username
-        key: ${{ secrets.SSH_PRIVATE_KEY }}   # Your SSH private key
+        host: ${{ secrets.119.28.110.17 }}          # IP VPS Anda
+        username: ${{ secrets.root }}    # Username SSH (misal: root)
+        key: ${{ secrets.Alex123! }}   # Kunci SSH privat Anda
+        
+        # Perintah yang akan dijalankan di VPS Anda
         script: |
-          echo "Connecting to VPS..."
-          cd ~/my-whatsapp-chatbot || exit 1 # Go to project folder on VPS
-          echo "Pulling latest code..."
-          git pull origin master || exit 1      # Get latest code from master branch
-          echo "Pulling latest Docker images..."
-          docker-compose pull              # Download updated images (like backend)
-          echo "Restarting services..."
-          docker-compose up -d --remove-orphans # Apply changes and restart
-          echo "Deployment finished!"
+          cd ~/Whatsapp_Bot  # Masuk ke folder proyek di VPS Anda
+          git pull origin master   # Ambil kode terbaru dari GitHub
+          docker-compose build backend # Bangun ulang image backend
+          docker-compose up -d --remove-orphans # Restart semua kontainer
+          echo "Deployment finished successfully!"
