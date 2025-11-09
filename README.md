@@ -33,6 +33,8 @@ Coming soon
 - setelah pembayaran user akan dapat notif 
 - chat user tidak hanya part number 
 
+
+hallo test 
 Link Video 
 
 https://mikroskilacid-my.sharepoint.com/:v:/g/personal/221110286_students_mikroskil_ac_id/ER1_qit34hZBpQyShVmUydYBLboajpFxQz6tcnrTkqYA9w?e=QjMM9s
