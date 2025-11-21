@@ -41,7 +41,7 @@ services:
     volumes:
       - ./mysql-data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "3307:3306"
 
   backend:
     build: ./backend
@@ -67,3 +67,4 @@ services:
     command: http process:5678
     depends_on:
       - process # Pastikan n8n sudah berjalan sebelum ngrok dimulai
+  
