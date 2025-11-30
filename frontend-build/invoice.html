@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice - Estimasi Jasa</title>
+    <script src="/_sdk/data_sdk.js"></script>
+    <script src="/_sdk/element_sdk.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <style>@view-transition { navigation: auto; }</style>
+</head>
+<body class="bg-gray-50">
+    <a href="detail.html" class="absolute top-4 left-4 bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">← Kembali</a>
+    <div id="invoicePage" class="w-full min-h-screen bg-gray-50 p-8">
+        <div class="invoice-container">
+            <div class="flex justify-between items-start mb-6 no-print">
+                 
+                <button id="printBtn" class="text-white px-6 py-2 rounded-lg font-semibold transition-all" style="background: linear-gradient(to right, #dc2626, #fbbf24);"> 🖨️ Cetak </button>
+            </div>
+            <div class="text-center mb-8 border-b pb-6">
+                <h1 id="invoiceTitle" class="text-3xl font-bold text-gray-800 mb-2">Invoice Estimasi Jasa</h1>
+                <p class="text-gray-600">No. Invoice: <span id="invoiceNumber"></span></p>
+                <p class="text-gray-600">Tanggal: <span id="invoiceDate"></span></p>
+            </div>
+            <div class="mb-8">
+                <h3 class="font-bold text-lg mb-3">Detail Layanan:</h3>
+                <table class="w-full">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="text-left p-3 border">Layanan</th>
+                            <th class="text-left p-3 border">Model Mobil</th>
+                            <th class="text-right p-3 border">Harga</th>
+                            <th class="text-center p-3 border">Qty</th>
+                            <th class="text-right p-3 border">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoiceItems"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-end">
+                <div class="w-64 space-y-2">
+                    <div class="flex justify-between"><span>Subtotal:</span> <span id="invoiceSubtotal" class="font-semibold">Rp 0</span></div>
+                    <div class="flex justify-between"><span>Diskon:</span> <span id="invoiceDiscount" class="font-semibold">Rp 0</span></div>
+                    <div class="flex justify-between"><span>PPN (11%):</span> <span id="invoicePPN" class="font-semibold">Rp 0</span></div>
+                    <div class="flex justify-between text-xl font-bold border-t pt-2"><span>Total:</span> <span id="invoiceTotal" class="text-purple-600">Rp 0</span></div>
+                </div>
+            </div>
+            <div class="mt-8 text-center text-gray-600 text-sm border-t pt-6">
+                <p>Terima kasih atas kepercayaan Anda menggunakan layanan kami</p>
+            </div>
+        </div>
+    </div>
+    <script src="service.js"></script>
+</body>
+</html>

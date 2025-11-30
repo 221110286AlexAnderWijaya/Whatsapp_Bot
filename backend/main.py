@@ -3,9 +3,10 @@ import bcrypt
 import shutil # Impor modul shutil untuk streaming file
 import uuid
 import jwt
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict, Any
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, HTTPException, Depends, status, Form, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, status, Form, UploadFile, File, Query
+
 from fastapi.security import OAuth2PasswordBearer # Tetap pakai ini untuk dependensi
 from fastapi.middleware.cors import CORSMiddleware # Tambahkan UploadFile dan File
 from pydantic import BaseModel
@@ -20,7 +21,7 @@ app = FastAPI(title="Chatbot Backend API", description="API untuk mengelola user
 
 # --- Konfigurasi CORS ---
 origins = [
-    "http://119.28.110.17:3000"
+    "http://119.28.110.17:3000",
     "http://endlessproject.my.id",   # Tambahkan ini
     "https://endlessproject.my.id"
 ]
@@ -32,6 +33,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+CAR_COLUMN_MAPPING = {
+    "Chery Omoda 5": [
+        "Omoda 5 RZ", "OMODA 5 Z", "OMODA 5GT FWD", 
+        "OMODA 5GT AWD", "OMODA 5 EV", "C5 RZ", "C5 Z"
+    ],
+    "Chery Tiggo 7 Pro": [
+        "TIGGO 7 PREMIUM", "TIGGO 7 LUXURY", "TIGGO 7 COMFORT"
+    ],
+    "Chery Tiggo 8 Pro": [
+        "TIGGO 8 CSH", "TIGGO 8 PRO PREMIUM", "TIGGO 8 PRO LUXURY", 
+        "TIGGON PRO 8 1.6 COMFORT", "TIGGO 8 PRO 1.6 PREMIUM", "TIGGO 8 PRO MAX"
+    ],
+    "Chery Tiggo 5X": [
+        "TIGGO CROSS" # Asumsi Tiggo 5X menggunakan kolom Tiggo Cross atau J6 (sesuaikan jika ada kolom lain)
+    ],
+    "Jaecoo J6": [
+        "J6 IWD", "J6 RWD"
+    ]
+}
 
 # Ambil konfigurasi dari environment variables Docker Compose
 DATABASE_HOST = os.getenv("DATABASE_HOST", "db")
@@ -404,6 +425,8 @@ def clean_price_string(price_str: Optional[str]) -> Optional[Union[int, float]]:
         # Tangkap error lain jika terjadi saat pembersihan
         return None # Mengembalikan None jika ada masalah tak terduga
 
+
+
 # --- Endpoint untuk MENGAMBIL Data Sparepart (Sudah Dimodifikasi) ---
 @app.get("/api/spareparts")
 async def get_spareparts(current_user_phone: str = Depends(get_current_user)):
@@ -444,6 +467,7 @@ async def get_spareparts(current_user_phone: str = Depends(get_current_user)):
     finally:
         if cursor: cursor.close()
         if conn and conn.is_connected(): conn.close()
+
 
 
 # --- [BARU] Endpoint untuk MEMULAI Sesi Pembayaran ---
@@ -631,6 +655,173 @@ async def confirm_payment(transaction_id: str):
 
     except mysql.connector.Error as err:
         raise HTTPException(status_code=500, detail=f"Gagal konfirmasi pembayaran: {err}")
+    finally:
+        if cursor: cursor.close()
+        if conn and conn.is_connected(): conn.close()
+
+# --- Endpoint Services (Pastikan Tabel services_data ADA) ---
+@app.get("/api/services") 
+async def get_services(current_user_phone: str = Depends(get_current_user)) -> List[Dict[str, Any]]:
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Pastikan nama tabel dan kolom di DB Anda sesuai dengan query ini!
+        cursor.execute("""
+            SELECT 
+                code, 
+                name, 
+                hourly_rate as price 
+            FROM services_data
+        """)
+        services_from_db = cursor.fetchall()
+        
+        # Handle jika tabel kosong, kembalikan list kosong, bukan error
+        if not services_from_db:
+            return []
+
+        formatted_services = []
+        for service in services_from_db:
+             formatted_services.append({
+                 "code": service.get("code", "").strip(),
+                 "name": service.get("name", "").strip(),
+                 "price": service.get("price") 
+             })
+             
+        return formatted_services
+
+    except mysql.connector.Error as err:
+        print(f"Services DB Error: {err}")
+        # Beri pesan error spesifik jika tabel tidak ditemukan
+        if err.errno == 1146: # Error code untuk Table doesn't exist
+            raise HTTPException(status_code=500, detail="Tabel 'services_data' tidak ditemukan di database.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {err}")
+    finally:
+        if cursor: cursor.close()
+        if conn and conn.is_connected(): conn.close()
+
+# --- Endpoint Sparepart Filtered (Perbaikan Logic) ---
+@app.get("/api/spareparts/by-type")
+async def get_spareparts_by_type(
+    type: str = Query(..., description="Contoh input: Chery Omoda 5"), 
+    current_user_phone: str = Depends(get_current_user)
+) -> List[Dict[str, Any]]:
+    
+    # CARA PANGGIL DI POSTMAN/BROWSER:
+    # http://localhost:8000/api/spareparts/by-type?type=Chery Omoda 5
+    
+    conn = None
+    cursor = None
+    
+    # Mapping nama mobil ke nama KOLOM di database
+    # Pastikan nama kolom di database tidak mengandung spasi jika tidak pakai backticks, 
+    # tapi di sini kita pakai backtick (`) jadi aman.
+    column_key = None
+    
+    # Cek mapping
+    for generic_name, specific_models in CAR_COLUMN_MAPPING.items():
+        if type in specific_models:
+            column_key = type
+            break
+        # Jika user mencari grup umum, misal "Chery Omoda 5", kita ambil salah satu varian default?
+        # Atau biarkan dia mencari kolom dengan nama persis.
+        if type == generic_name:
+            # Opsional: Mapping generic name ke salah satu kolom default, misal Omoda 5 RZ
+            # column_key = "Omoda 5 RZ" 
+            pass
+
+    # Jika tidak ada di mapping, gunakan input user (dengan resiko kolom tidak ada)
+    if not column_key:
+        column_key = type 
+
+    # Sanitasi input dasar untuk mencegah SQL Injection via nama kolom (meski sulit di variable binding)
+    # Kita hanya izinkan alphanumeric, spasi, dan strip/underscore
+    import re
+    if not re.match(r"^[a-zA-Z0-9 _-]+$", column_key):
+        raise HTTPException(status_code=400, detail="Format tipe mobil tidak valid.")
+
+    compatibility_column = f"`{column_key}`"
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True) 
+
+        # Query: Ambil sparepart dimana kolom mobil tersebut bernilai 'ok' atau 'v'
+        query = f"""
+            SELECT 
+                `nomor_sparepart` AS part_number,
+                `nama_sparepart` AS part_name,
+                `harga_jual_exc_tax` AS price_str
+            FROM sparepart_data
+            WHERE {compatibility_column} = 'ok' OR {compatibility_column} = 'v'
+        """
+        
+        cursor.execute(query) 
+        spareparts_from_db = cursor.fetchall()
+
+        cleaned_spareparts = []
+        for part in spareparts_from_db:
+            cleaned_price = clean_price_string(part.get("price_str")) 
+            cleaned_spareparts.append({
+                "part_number": part.get("part_number", "").strip(), 
+                "part_name": part.get("part_name", "").strip(),
+                "price": cleaned_price
+            })
+
+        return cleaned_spareparts
+
+    except mysql.connector.Error as err:
+        print(f"Spareparts Filter Error: {err}")
+        # Handle error jika kolom tidak ada (Error 1054: Unknown column)
+        if err.errno == 1054:
+             raise HTTPException(
+                 status_code=404, 
+                 detail=f"Tipe mobil '{column_key}' tidak ditemukan dalam database (Kolom tidak ada)."
+             )
+        raise HTTPException(status_code=500, detail="Terjadi kesalahan pada server.")
+                    
+    finally:
+        if cursor: cursor.close()
+        if conn and conn.is_connected(): conn.close()
+
+# --- 1. Tambahkan Model Baru di bagian atas (dekat UserCreate) ---
+# --- 1. Tambahkan Model Khusus untuk Input Jasa Baru ---
+class ServiceCreate(BaseModel):
+    name: str
+    price: float
+
+# --- 2. Tambahkan Endpoint POST Baru ---
+@app.post("/api/services/add", status_code=status.HTTP_201_CREATED)
+async def add_custom_service(service: ServiceCreate, current_user_phone: str = Depends(get_current_user)):
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Generate Kode Unik Otomatis (misal: SVC-A1B2)
+        unique_code = f"SVC-{str(uuid.uuid4())[:4].upper()}"
+
+        # Simpan ke Database
+        # Pastikan kolom hourly_rate sesuai dengan struktur tabel Anda
+        cursor.execute(
+            "INSERT INTO services_data (code, name, hourly_rate) VALUES (%s, %s, %s)",
+            (unique_code, service.name, service.price)
+        )
+        conn.commit()
+
+        # Kembalikan data ke Frontend agar bisa langsung dipakai
+        return {
+            "code": unique_code,
+            "name": service.name,
+            "price": service.price
+        }
+
+    except mysql.connector.Error as err:
+        print(f"Add Service Error: {err}")
+        raise HTTPException(status_code=500, detail="Gagal menyimpan jasa baru.")
     finally:
         if cursor: cursor.close()
         if conn and conn.is_connected(): conn.close()
