@@ -6,18 +6,41 @@ import jwt
 from typing import Optional, Union, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, status, Form, UploadFile, File, Query
-
+from fastapi.staticfiles import StaticFiles
+from weasyprint import HTML, CSS
 from fastapi.security import OAuth2PasswordBearer # Tetap pakai ini untuk dependensi
 from fastapi.middleware.cors import CORSMiddleware # Tambahkan UploadFile dan File
+from fastapi.responses import HTMLResponse, FileResponse # [TAMBAHKAN] Impor HTMLResponse
 from pydantic import BaseModel
 import mysql.connector
 from dotenv import load_dotenv
+from pathlib import Path
+import math
+import time
+import requests
+import json 
 
-# Muat variabel environment (jika ada file .env di folder backend/)
+
+SENDABLE_API_KEY = "send_ab562d228ad7c5890fba9681a9fd02dcaeb69f702d1bf5d758858f4ca804c990" 
+WHATSAPP_API_URL = "https://api.sendable.dev/w/messages.send"
+PUBLIC_BASE_URL = "https://endlessproject.my.id/api/invoices" # Ganti dengan URL domain Anda
+LOCAL_SAVE_DIR = Path("./frontend-build/invoices")
 load_dotenv()
 
 # --- Konfigurasi ---
 app = FastAPI(title="Chatbot Backend API", description="API untuk mengelola user dan riwayat chat.")
+
+# [FIX] Mount folder invoices agar file PDF bisa diakses publik via URL
+LOCAL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/invoices", StaticFiles(directory=LOCAL_SAVE_DIR), name="invoices")
+
+# [ADD] Endpoint fallback/eksplisit untuk memastikan file bisa diakses via /api
+@app.get("/api/invoices/{filename}")
+async def get_invoice_api(filename: str):
+    file_path = LOCAL_SAVE_DIR / filename
+    if file_path.exists():
+        return FileResponse(file_path)
+    raise HTTPException(status_code=404, detail="Invoice not found")
 
 # --- Konfigurasi CORS ---
 origins = [
@@ -63,6 +86,28 @@ DATABASE_NAME = os.getenv("DATABASE_NAME", "chatbot_history")
 JWT_SECRET = os.getenv("JWT_SECRET", "GantiDenganRahasiaJWTYangKuatDanPanjang")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 # Token berlaku 1 jam
+
+class ItemInvoice(BaseModel):
+    code: str
+    name: str
+    price: float
+    type: str
+    quantity: float
+    lc_per_hour: float
+
+# [Model 2] Detail Pelanggan
+class CustomerDetails(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    plate: Optional[str] = None
+    note: Optional[str] = None
+
+# [Model 3] Payload Utama (Memanggil Model 1 & 2)
+class InvoicePayload(BaseModel):
+    customer: CustomerDetails
+    car: dict
+    items: List[ItemInvoice]
+    totals: Dict[str, Any]
 
 # --- Model Data Pydantic ---
 class UserCreate(BaseModel):
@@ -178,9 +223,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
 
 # --- Endpoints API ---
 
-@app.get("/")
-def read_root():
-    return {"message": "Selamat datang di Backend API Chatbot!"}
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
 
 @app.post("/api/register", status_code=status.HTTP_201_CREATED)
 async def register_user(user: UserCreate):
@@ -661,47 +708,72 @@ async def confirm_payment(transaction_id: str):
 
 # --- Endpoint Services (Pastikan Tabel services_data ADA) ---
 @app.get("/api/services") 
-async def get_services(current_user_phone: str = Depends(get_current_user)) -> List[Dict[str, Any]]:
+async def get_services(car_model: Optional[str] = Query(None, description="Tipe mobil yang dipilih untuk filtering"),
+    current_user_phone: str = Depends(get_current_user)):
     conn = None
     cursor = None
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
         
-        # Pastikan nama tabel dan kolom di DB Anda sesuai dengan query ini!
-        cursor.execute("""
-            SELECT 
-                code, 
-                name, 
-                hourly_rate as price 
-            FROM services_data
-        """)
+        sql = """
+          SELECT 
+            code, jenis_pekerjaan AS name, labor_charge AS price, 
+            tipe_kendaraan, lc_per_hour, flat_rate
+          FROM services_data
+        """
+        params = []
+        
+        # --- LOGIKA FILTERING ---
+        if car_model:
+            normalized_model = car_model.upper().strip()
+            
+            # Membuat list pencarian, yang mencakup model spesifik dan root model.
+            search_models = ['ALL MODEL', normalized_model]
+            
+            # Logika Fuzzy / Generic Root
+            if 'OMODA 5' in normalized_model:
+                search_models.append('OMODA 5')
+            elif 'TIGGO 7' in normalized_model:
+                search_models.append('TIGGO 7')
+            elif 'TIGGO 8' in normalized_model:
+                search_models.append('TIGGO 8')
+            elif 'J6' in normalized_model:
+                search_models.append('J6')
+
+            # Hapus duplikasi
+            unique_models = list(set(search_models))
+            
+            # Membangun Klausa WHERE menggunakan 'IN'
+            placeholders = ', '.join(['%s'] * len(unique_models))
+            sql += f" WHERE tipe_kendaraan IN ({placeholders})"
+            params = unique_models
+
+        cursor = conn.cursor(dictionary=True)
+        print(f"Executing SQL: {sql} with params: {params}") # DEBUGGING
+        
+        cursor.execute(sql, tuple(params)) 
         services_from_db = cursor.fetchall()
         
-        # Handle jika tabel kosong, kembalikan list kosong, bukan error
-        if not services_from_db:
-            return []
-
         formatted_services = []
         for service in services_from_db:
-             formatted_services.append({
-                 "code": service.get("code", "").strip(),
-                 "name": service.get("name", "").strip(),
-                 "price": service.get("price") 
-             })
-             
+            formatted_services.append({
+                "code": service.get("code", "").strip(),
+                "name": service.get("name", "").strip(),
+                "price": service.get("price"),
+                "tipe_kendaraan": service.get("tipe_kendaraan"),
+                "lc_per_hour": service.get("lc_per_hour"),
+                "flat_rate": service.get("flat_rate")
+            })
+            
         return formatted_services
 
     except mysql.connector.Error as err:
         print(f"Services DB Error: {err}")
-        # Beri pesan error spesifik jika tabel tidak ditemukan
-        if err.errno == 1146: # Error code untuk Table doesn't exist
-            raise HTTPException(status_code=500, detail="Tabel 'services_data' tidak ditemukan di database.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {err}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error database: {err}")
     finally:
         if cursor: cursor.close()
         if conn and conn.is_connected(): conn.close()
-
+        
 # --- Endpoint Sparepart Filtered (Perbaikan Logic) ---
 @app.get("/api/spareparts/by-type")
 async def get_spareparts_by_type(
@@ -789,8 +861,8 @@ async def get_spareparts_by_type(
 # --- 1. Tambahkan Model Baru di bagian atas (dekat UserCreate) ---
 # --- 1. Tambahkan Model Khusus untuk Input Jasa Baru ---
 class ServiceCreate(BaseModel):
-    name: str
-    price: float
+    jenis_pekerjaan: str
+    lc_per_hour: float
 
 # --- 2. Tambahkan Endpoint POST Baru ---
 @app.post("/api/services/add", status_code=status.HTTP_201_CREATED)
@@ -807,16 +879,16 @@ async def add_custom_service(service: ServiceCreate, current_user_phone: str = D
         # Simpan ke Database
         # Pastikan kolom hourly_rate sesuai dengan struktur tabel Anda
         cursor.execute(
-            "INSERT INTO services_data (code, name, hourly_rate) VALUES (%s, %s, %s)",
-            (unique_code, service.name, service.price)
+            "INSERT INTO services_data (code, jenis_pekerjaan, lc_per_hour) VALUES (%s, %s, %s)",
+            (unique_code, service.jenis_pekerjaan, service.lc_per_hour)
         )
         conn.commit()
 
         # Kembalikan data ke Frontend agar bisa langsung dipakai
         return {
             "code": unique_code,
-            "name": service.name,
-            "price": service.price
+            "jenis_pekerjaan": service.jenis_pekerjaan,
+            "price": service.lc_per_hour
         }
 
     except mysql.connector.Error as err:
@@ -825,3 +897,197 @@ async def add_custom_service(service: ServiceCreate, current_user_phone: str = D
     finally:
         if cursor: cursor.close()
         if conn and conn.is_connected(): conn.close()
+
+
+def format_whatsapp_id(phone: str) -> str:
+    # ... (Logika konversi 08xxx/628xxx ke 628xxx@s.whatsapp.net) ...
+    if not phone: return ""
+    cleaned = ''.join(filter(str.isdigit, phone))
+    if cleaned.startswith('0'): cleaned = '62' + cleaned[1:]
+    elif not cleaned.startswith('62') and len(cleaned) >= 8: cleaned = '62' + cleaned
+    return cleaned + '@s.whatsapp.net'
+
+
+@app.post("/api/invoice/send_whatsapp")
+async def send_invoice_handler(data: InvoicePayload, current_user_phone: str = Depends(get_current_user)):
+    
+    # [1] Validasi nomor WhatsApp
+    target_phone_wa_id = format_whatsapp_id(data.customer.phone)
+    if not target_phone_wa_id:
+        raise HTTPException(status_code=400, detail="Nomor HP pelanggan tidak valid.")
+
+    # [2] Buat PDF Invoice
+    try:
+        html_content = generate_invoice_html(data)
+        pdf_bytes = HTML(string=html_content).write_pdf()
+
+        filename = f"invoice_{data.customer.phone}_{int(time.time())}.pdf"
+        final_save_path = LOCAL_SAVE_DIR / filename
+        final_save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(final_save_path, "wb") as f:
+            f.write(pdf_bytes)
+        print(f"PDF Generated: {final_save_path}, Size: {len(pdf_bytes)} bytes") # Debug log
+
+        public_pdf_url = f"{PUBLIC_BASE_URL}/{filename}"
+
+    except Exception as e:
+        print(f"PDF Handling Error: {e}")
+        raise HTTPException(status_code=500, detail="Gagal membuat file PDF.")
+
+    # ==================================================================
+    # [3] WHATSAPP PAYLOAD — "ONE CONTENT TYPE ONLY"
+    # ==================================================================
+    target_phone_raw = format_whatsapp_id(data.customer.phone).split('@')[0] 
+    public_pdf_url = f"{PUBLIC_BASE_URL}/{filename}"
+    headers={"Content-Type": "application/json", "x-api-key": SENDABLE_API_KEY}
+
+    payload = {
+    "chatId": f"{target_phone_raw}@s.whatsapp.net",
+    "document": {
+        "url": public_pdf_url,
+        "filename": f"Invoice_Estimasi_{target_phone_raw}.pdf",
+        "caption": ""  # <-- WAJIB ADA MESKI KOSONG!!!
+    }
+}
+
+
+
+    # Pastikan Anda menggunakan `json=payload` saat melakukan requests.post()
+    try:
+        response = requests.post(
+            WHATSAPP_API_URL,
+            headers={"Content-Type": "application/json", "x-api-key": SENDABLE_API_KEY},
+            json=payload # PENTING
+        )
+
+    # Hapus potensi field lain yang menyebabkan error:
+    # NO text, NO caption, NO body, NO image.
+    # ==================================================================
+        print("\n=== RESPONSE SENDABLE ===")
+        print("Status:", response.status_code)
+        print("Body:", response.text)
+        print(public_pdf_url)
+
+        response.raise_for_status()
+
+        return {
+            "message": "Invoice PDF berhasil dikirim ke WhatsApp!",
+            "status": response.json()
+        }
+
+    except requests.exceptions.HTTPError as err:
+        error_json = err.response.json()
+        print("Sendable API Error:", error_json)
+        raise HTTPException(status_code=500, detail=error_json.get("message"))
+
+
+
+def format_rupiah(amount):
+    """Fungsi untuk memformat angka menjadi string Rupiah (Rp 123.456)"""
+    if amount is None or math.isnan(amount):
+        amount = 0
+    return f"Rp {amount:,.0f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def generate_invoice_html(data: InvoicePayload) -> str:
+    """Merender data invoice dari Payload JSON menjadi dokumen HTML/PDF yang dicetak."""
+    
+    # Ambil data customer
+    customer = data.customer
+    
+    # Ambil data total
+    subtotal = data.totals.get('subtotal', 0)
+    grand_total = data.totals.get('grand_total', 0)
+    ppn = data.totals.get('ppn', 0)
+    
+    # Generate baris item
+    item_rows = ""
+    for item in data.items:
+        # Kalkulasi total per item (LC/100 * Menit atau Price * Pcs)
+        if item.type == 'service':
+            item_total = (item.lc_per_hour / 100) * item.quantity
+            unit_price_display = format_rupiah(item.lc_per_hour) + " /100 mnt"
+            qty_display = f"{item.quantity / 100:.2f} Jam ({item.quantity} Menit)"
+        else:
+            item_total = item.price * item.quantity
+            unit_price_display = format_rupiah(item.price) + " /pcs"
+            qty_display = f"{item.quantity} Pcs"
+
+        item_rows += f"""
+        <tr>
+            <td style="padding: 8px; border: 1px solid #ccc;">
+                <div style="font-weight: bold;">{item.name}</div>
+                <div style="font-size: 10px; color: #666;">Kode: {item.code}</div>
+            </td>
+            <td style="padding: 8px; border: 1px solid #ccc;">{data.car.get('model') or '-'}</td>
+            <td style="padding: 8px; border: 1px solid #ccc; text-align: right; font-size: 12px;">{unit_price_display}</td>
+            <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">{qty_display}</td>
+            <td style="padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold;">{format_rupiah(item_total)}</td>
+        </tr>
+        """
+
+    # --- HTML STRUCTURE ---
+    return f"""
+    <html>
+    <head>
+        <title>Invoice Estimasi</title>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: sans-serif; font-size: 12px; margin: 0; padding: 20px; color: #333; }}
+            .container {{ width: 100%; max-width: 700px; margin: 0 auto; border: 1px solid #eee; padding: 20px; }}
+            h1 {{ font-size: 20px; text-align: center; margin-bottom: 5px; color: #444; }}
+            h3 {{ font-size: 14px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
+            .meta {{ text-align: center; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            th {{ background-color: #f0f0f0; border: 1px solid #ccc; padding: 8px; text-align: left; }}
+            td {{ border: 1px solid #ccc; padding: 8px; }}
+            .totals-box {{ width: 250px; margin-left: auto; margin-top: 20px; }}
+            .total-line {{ display: flex; justify-content: space-between; padding: 4px 0; }}
+            .total-final {{ font-size: 14px; font-weight: bold; border-top: 2px solid #333; padding-top: 6px; color: #6a1b9a; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="meta">
+                <h1>INVOICE ESTIMASI JASA</h1>
+                <p>No. Invoice: INV-{datetime.now().strftime('%Y%m%d%H%M%S')}</p>
+                <p>Tanggal: {datetime.now().strftime('%d %B %Y')}</p>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <h3>Detail Pelanggan:</h3>
+                <div style="line-height: 1.5;">
+                    Nama: <strong>{customer.name or '-'}</strong> | 
+                    Plat BK: <strong>{customer.plate or '-'}</strong> | 
+                    No. HP: <strong>{customer.phone or '-'}</strong>
+                    <br>Catatan: {customer.note or '-'}
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3>Detail Layanan:</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 40%;">Layanan</th>
+                            <th style="width: 15%;">Model Mobil</th>
+                            <th style="width: 20%; text-align: right;">Harga Satuan</th>
+                            <th style="width: 10%; text-align: center;">Qty</th>
+                            <th style="width: 15%; text-align: right;">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>{item_rows}</tbody>
+                </table>
+            </div>
+
+            <div class="totals-box">
+                <div class="total-line"><span>Subtotal:</span> <span>{format_rupiah(subtotal)}</span></div>
+                <div class="total-line"><span>Diskon:</span> <span>{format_rupiah(0)}</span></div>
+                <div class="total-line"><span>PPN (11%):</span> <span>{format_rupiah(ppn)}</span></div>
+                <div class="total-final total-line"><span>TOTAL:</span> <span>{format_rupiah(grand_total)}</span></div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """

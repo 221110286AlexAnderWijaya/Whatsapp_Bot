@@ -4,40 +4,73 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Invoice - Estimasi Jasa</title>
-    <script src="/_sdk/data_sdk.js"></script>
-    <script src="/_sdk/element_sdk.js"></script>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
-    <style>@view-transition { navigation: auto; }</style>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background-color: white; color: black !important; padding: 0; margin: 0; }
+            #invoicePage { width: 100%; min-height: initial; padding: 0 !important; }
+            table, th, td { border-color: #333 !important; }
+        }
+    </style>
 </head>
 <body class="bg-gray-50">
-    <a href="detail.html" class="absolute top-4 left-4 bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">← Kembali</a>
     <div id="invoicePage" class="w-full min-h-screen bg-gray-50 p-8">
-        <div class="invoice-container">
-            <div class="flex justify-between items-start mb-6 no-print">
-                 
-                <button id="printBtn" class="text-white px-6 py-2 rounded-lg font-semibold transition-all" style="background: linear-gradient(to right, #dc2626, #fbbf24);"> 🖨️ Cetak </button>
+        <div class="invoice-container max-w-4xl mx-auto bg-white p-6 shadow-lg">
+
+            <a href="detail.html" class="absolute top-4 left-4 bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 no-print">← Kembali</a>
+
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6" role="alert">
+                <p class="font-bold text-yellow-800">PERINGATAN PENTING:</p>
+                <p class="text-sm text-yellow-700">Harga jasa dan sparepart di invoice ini adalah **ESTIMASI** dan **TIDAK TERIKAT**. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan dan akan dikonfirmasi ulang saat proses pengerjaan.</p>
             </div>
+            
+            <div class="flex justify-between items-start mb-6 no-print">
+                <div class="text-xl font-semibold text-gray-600">Endless Project</div>
+                <div class="flex gap-3">
+                    <button id="whatsappBtn" class="text-white px-6 py-2 rounded-lg font-semibold transition-all bg-green-500 hover:bg-green-600"> 
+                        <i class="fab fa-whatsapp mr-2"></i>Kirim ke WhatsApp 
+                    </button>
+                    <button id="printBtn" class="text-white px-6 py-2 rounded-lg font-semibold transition-all" style="background: linear-gradient(to right, #dc2626, #fbbf24);"> 🖨️ Cetak </button>
+                </div>
+            </div>
+
             <div class="text-center mb-8 border-b pb-6">
                 <h1 id="invoiceTitle" class="text-3xl font-bold text-gray-800 mb-2">Invoice Estimasi Jasa</h1>
                 <p class="text-gray-600">No. Invoice: <span id="invoiceNumber"></span></p>
                 <p class="text-gray-600">Tanggal: <span id="invoiceDate"></span></p>
             </div>
+            
+            <div class="mb-8 p-4 border rounded-lg bg-gray-50">
+                <h3 class="font-bold text-lg mb-3">Detail Pelanggan:</h3>
+                <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                    <div><span class="font-medium">Nama:</span> <span id="customerNameInv">-</span></div>
+                    <div><span class="font-medium">Plat BK:</span> <span id="customerPlateInv">-</span></div>
+                    <div><span class="font-medium">No. HP:</span> <span id="customerPhoneInv">-</span></div>
+                    <div class="col-span-2"><span class="font-medium">Catatan:</span> <span id="customerNoteInv">-</span></div>
+                </div>
+            </div>
+
             <div class="mb-8">
                 <h3 class="font-bold text-lg mb-3">Detail Layanan:</h3>
-                <table class="w-full">
+                <table class="w-full border-collapse">
                     <thead class="bg-gray-100">
                         <tr>
-                            <th class="text-left p-3 border">Layanan</th>
-                            <th class="text-left p-3 border">Model Mobil</th>
-                            <th class="text-right p-3 border">Harga</th>
-                            <th class="text-center p-3 border">Qty</th>
-                            <th class="text-right p-3 border">Subtotal</th>
+                            <th class="text-left p-3 border border-gray-300">Layanan</th>
+                            <th class="text-left p-3 border border-gray-300">Model Mobil</th>
+                            <th class="text-right p-3 border border-gray-300">Harga Satuan</th>
+                            <th class="text-center p-3 border border-gray-300">Qty</th>
+                            <th class="text-right p-3 border border-gray-300">Subtotal</th>
                         </tr>
                     </thead>
                     <tbody id="invoiceItems"></tbody>
                 </table>
             </div>
+            
             <div class="flex justify-end">
                 <div class="w-64 space-y-2">
                     <div class="flex justify-between"><span>Subtotal:</span> <span id="invoiceSubtotal" class="font-semibold">Rp 0</span></div>
@@ -46,11 +79,13 @@
                     <div class="flex justify-between text-xl font-bold border-t pt-2"><span>Total:</span> <span id="invoiceTotal" class="text-purple-600">Rp 0</span></div>
                 </div>
             </div>
+            
             <div class="mt-8 text-center text-gray-600 text-sm border-t pt-6">
                 <p>Terima kasih atas kepercayaan Anda menggunakan layanan kami</p>
             </div>
         </div>
     </div>
+    
     <script src="service.js"></script>
 </body>
 </html>

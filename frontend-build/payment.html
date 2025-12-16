@@ -67,8 +67,8 @@
             const qrcodeContainer = document.getElementById('qrcode-container');
             const paymentStatusText = document.getElementById('payment-status-text');
             const paymentErrorEl = document.getElementById('paymentError');
-            const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000`;
-
+            // const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000`;
+            const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}`;
             let pollingInterval; // Variabel untuk menyimpan interval polling status
             let qrRefreshInterval; // Variabel untuk menyimpan interval refresh QR
 
@@ -119,6 +119,7 @@
 
                 try {
                     const token = localStorage.getItem('authToken');
+                    
                     const response = await fetch(`${API_BASE_URL}/api/payments/initiate`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}` },

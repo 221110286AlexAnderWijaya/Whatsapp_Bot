@@ -5,4 +5,7 @@ bcrypt
 PyJWT
 mysql-connector-python
 sqlalchemy
-python-multipart # <-- ADD THIS LINE
+weasyprint
+python-multipart 
+requests
+pdfkit
