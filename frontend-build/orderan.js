@@ -1,18 +1,16 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // Referensi ke elemen-elemen HTML (ini sudah benar untuk quotation.html)
     const tableBody = document.getElementById('orderTableBody');
     const emptyState = document.getElementById('empty-state');
     const loadingRow = document.getElementById('loading-row');
     const grandTotalSection = document.getElementById('grand-total-section');
     const confirmPaymentBtn = document.getElementById('confirmPaymentBtn');
-    const API_BASE_URL = '';
+    
+    const API_BASE_URL = ''; // Tambahkan URL API Anda jika ada
     const token = localStorage.getItem('authToken');
 
-    // Variabel untuk menyimpan data
-    let sparepartData = {}; // { 'part_number': { name: '...', price: ... } }
+    let sparepartData = {}; 
+    let currentAggregatedItems = {}; 
 
-    let currentAggregatedItems = {}; // Variabel untuk menyimpan item yang diagregasi agar bisa diakses saat konfirmasi
-    // --- FUNGSI BANTUAN ---
     function formatRupiah(number) {
         return new Intl.NumberFormat('id-ID', {
             style: 'currency',
@@ -21,54 +19,33 @@ document.addEventListener('DOMContentLoaded', function() {
         }).format(number);
     }
 
-    // --- FUNGSI UTAMA ---
-
-    // 1. Fungsi untuk mengambil data master sparepart
     async function fetchSparepartData() {
         if (!token) return;
         try {
             const response = await fetch(`${API_BASE_URL}/api/spareparts`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!response.ok) {
-                if (response.status === 401) { // Jika token tidak valid/expired
-                    throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
-                }
-                throw new Error('Gagal mengambil data master sparepart.');
-            }
-
+            if (!response.ok) throw new Error('Gagal mengambil data master sparepart.');
             const data = await response.json();
-
-            sparepartData = {}; // Kosongkan dulu untuk memastikan data selalu fresh
+            sparepartData = {};
             data.forEach(part => {
-                // Backend sudah membersihkan part_number dan mengonversi price ke angka
-                const cleanPartNumber = part.part_number; // part_number sudah bersih dari backend
-                if (cleanPartNumber) { // Pastikan part_number tidak null/empty
+                const cleanPartNumber = part.part_number;
+                if (cleanPartNumber) {
                     sparepartData[cleanPartNumber] = {
                         name: part.part_name || 'Nama tidak tersedia',
-                        price: Number(part.price) || 0 // [FIX] Paksa jadi Number untuk keamanan perhitungan
+                        price: Number(part.price) || 0
                     };
                 }
             });
-
-            // --- DEBUGGING ---
-            // Buka console (F12) -> tab "Console" untuk melihat ini.
-            console.log('--- MASTER SPAREPART DIMUAT (Sudah Angka) ---', sparepartData); // Cek konsol
-            // ------------------
-
         } catch (error) {
             console.error("Error fetching sparepart data:", error);
-            throw new Error(`Gagal memuat data master: ${error.message}`);
+            throw error;
         }
     }
 
-    // 2. Fungsi untuk mengambil data orderan dan memprosesnya
     async function fetchAndProcessOrders() {
         if (!token) {
-            loadingRow.innerHTML = `<td colspan="6" class="text-center py-8">
-                <p class="font-bold text-gray-700">Anda harus login untuk melihat orderan.</p>
-                <a href="login.html" class="mt-4 inline-block bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700">Login</a>
-            </td>`;
+            loadingRow.innerHTML = `<td colspan="7" class="text-center py-8">Login diperlukan.</td>`;
             return;
         }
 
@@ -76,23 +53,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch(`${API_BASE_URL}/api/orders/list`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!response.ok) {
-                if (response.status === 401) { // Jika token tidak valid/expired
-                    throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
-                }
-                throw new Error('Gagal mengambil daftar orderan.');
-            }
-            
+            if (!response.ok) throw new Error('Gagal mengambil daftar orderan.');
             const orders = await response.json();
             processAndRenderTable(orders);
-
         } catch (error) {
             console.error("Error fetching orders:", error);
-            loadingRow.innerHTML = `<td colspan="6" class="text-center py-8 text-red-600">${error.message}</td>`;
+            loadingRow.innerHTML = `<td colspan="7" class="text-center py-8 text-red-600">${error.message}</td>`;
         }
     }
 
-    // 3. Fungsi untuk memproses data dan merender tabel
     function processAndRenderTable(orders) {
         if (orders.length === 0) {
             loadingRow.classList.add('hidden');
@@ -101,215 +70,159 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        console.log('--- MEMPROSES ORDERAN ---'); // DEBUGGING
         const aggregatedItems = {};
-
         orders.forEach(order => {
-            // Ekstrak nomor sparepart dari 'items'
             const partNumberMatch = order.items.match(/^([^\s(]+)/);
             if (!partNumberMatch) return;
-
-            // Gunakan .trim() untuk membersihkan spasi ekstra dari string order
             const partNumber = partNumberMatch[1].trim(); 
-
-            // Ekstrak qty
             const qtyMatch = order.items.match(/Qty: (\d+)/);
             const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
-
-            // --- DEBUGGING ---
-            // Buka console (F12) untuk melihat ini.
-            // Cek apakah 'partNumber' ini ada di daftar 'MASTER SPAREPART' di atas.
-            console.log(`Mencari harga untuk Part Number: "${partNumber}"`);
-            const foundPart = sparepartData[partNumber]; // Mencari di master
-            
-            if (!foundPart) {
-                // Jika tidak ditemukan, ini akan muncul di console
-                console.warn(`HARGA TIDAK DITEMUKAN untuk: "${partNumber}"`);
-            }
-            // ------------------
+            const foundPart = sparepartData[partNumber];
 
             if (aggregatedItems[partNumber]) {
-                // Jika item sudah ada, tambahkan qty dan catat chat_id
                 aggregatedItems[partNumber].qty += qty;
                 aggregatedItems[partNumber].orderIds.add(order.id);
             } else {
-                // Jika item baru, buat entri baru
                 aggregatedItems[partNumber] = {
                     partNumber: partNumber,
                     qty: qty,
                     orderIds: new Set([order.id]),
-                    // Ambil data dari master sparepart
                     name: foundPart?.name || 'Nama tidak ditemukan',
-                    price: foundPart?.price ?? 0, // Gunakan nullish coalescing operator (??) untuk harga, 0 jika null/undefined
+                    price: foundPart?.price ?? 0,
+                    priceFound: !!foundPart
                 };
-                // Tandai harga ditemukan hanya jika part ditemukan DAN harganya bukan null (berarti valid)
-                aggregatedItems[partNumber].priceFound = !!foundPart && foundPart.price !== null;
             }
         });
 
-        currentAggregatedItems = aggregatedItems; // Simpan data agregasi
-        renderTable(Object.values(aggregatedItems));
+        currentAggregatedItems = aggregatedItems;
+        renderTable();
     }
 
-    // 4. Fungsi untuk merender baris tabel dan total
-    function renderTable(items) {
-        tableBody.innerHTML = ''; // Kosongkan tabel
-        
-        // Fungsi helper untuk menghitung ulang total global
-        function recalculateGlobalTotals() {
-            let subtotal = 0;
-            items.forEach(item => {
-                if (item.priceFound) {
-                    subtotal += item.qty * (Number(item.price) || 0); // [FIX] Pastikan harga dikali sebagai angka
-                }
-            });
+    function renderTable() {
+        tableBody.innerHTML = ''; 
+        const items = Object.values(currentAggregatedItems);
 
-            const ppn = subtotal * 0.11;
-            const total = subtotal + ppn;
-
-            document.getElementById('grand-subtotal').textContent = formatRupiah(subtotal);
-            document.getElementById('grand-ppn').textContent = formatRupiah(ppn);
-            document.getElementById('grand-total').textContent = formatRupiah(total);
+        if (items.length === 0) {
+            loadingRow.classList.add('hidden');
+            emptyState.classList.remove('hidden');
+            grandTotalSection.classList.add('hidden');
+            return;
         }
 
         let rowNum = 1;
-
         items.forEach(item => {
             const totalPerRow = item.qty * item.price;
- 
-            // Tentukan tampilan harga dan total berdasarkan apakah harga ditemukan
-            const priceDisplay = item.priceFound ? formatRupiah(item.price) : '<span class="text-red-600 font-semibold">Tidak Ditemukan</span>';
-            const totalPerRowDisplay = item.priceFound ? formatRupiah(totalPerRow) : '<span class="text-red-600 font-semibold">N/A</span>';
- 
-            const orderIdsText = Array.from(item.orderIds).filter(id => id).join(', ');
- 
             const row = document.createElement('tr');
-            // Tambahkan class jika harga tidak ditemukan untuk styling (misal, latar belakang sedikit merah)
-            if (!item.priceFound) {
-                row.className = 'bg-red-500/10';
-            }
+            if (!item.priceFound) row.className = 'bg-red-500/10';
+
             row.innerHTML = `
-                <td class="px-4 py-3">${rowNum++}</td>
-                <td class="px-4 py-3">
+                <td>${rowNum++}</td>
+                <td>
                     <div class="font-medium">${item.partNumber}</div>
-                    <div class="text-xs text-gray-600">Order ID: ${orderIdsText}</div>
+                    <div style="font-size:11px;color:#6b7280">IDs: ${Array.from(item.orderIds).join(', ')}</div>
                 </td>
-                <td class="px-4 py-3">${item.name}</td>
-                <td class="px-4 py-3 text-center">
-                    <input type="number" min="0" value="${item.qty}" class="qty-input w-16 text-center rounded-md p-1 border border-gray-300">
+                <td>${item.name}</td>
+                <td style="text-align:center">
+                    <input type="number" min="0" value="${item.qty}" class="qty-input">
                 </td>
-                <td class="px-4 py-3 text-right font-mono">${priceDisplay}</td>
-                <td class="px-4 py-3 text-right font-mono font-semibold row-total">${totalPerRowDisplay}</td>
+                <td style="text-align:right; font-family:monospace">${item.priceFound ? formatRupiah(item.price) : 'N/A'}</td>
+                <td style="text-align:right; font-family:monospace; font-weight:bold" class="row-total">
+                    ${item.priceFound ? formatRupiah(totalPerRow) : 'N/A'}
+                </td>
+                <td style="text-align:center">
+                    <button class="delete-btn" title="Hapus Item">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </td>
             `;
-            
-            // Event Listener untuk perubahan Qty
-            const qtyInput = row.querySelector('.qty-input');
-            qtyInput.addEventListener('input', function() {
+
+            // EVENT: Input Qty (Konfirmasi jika 0)
+            const input = row.querySelector('.qty-input');
+            input.addEventListener('change', function() {
                 const newQty = parseInt(this.value);
-                // [FIX] Izinkan 0 agar harga terupdate jadi 0
-                if (!isNaN(newQty) && newQty >= 0) {
-                    item.qty = newQty; // Update data item
-                    
-                    // Update Row Total jika harga ada
-                    if (item.priceFound) {
-                        const newRowTotal = item.qty * (Number(item.price) || 0);
-                        row.querySelector('.row-total').textContent = formatRupiah(newRowTotal);
-                    }
-                    
-                    // Update Grand Total
-                    recalculateGlobalTotals();
+                if (newQty === 0) {
+                    handleDeleteItem(item.partNumber);
+                } else if (!isNaN(newQty) && newQty > 0) {
+                    currentAggregatedItems[item.partNumber].qty = newQty;
+                    recalculateGlobals();
+                } else {
+                    this.value = currentAggregatedItems[item.partNumber].qty;
                 }
+            });
+
+            // EVENT: Tombol Sampah
+            row.querySelector('.delete-btn').addEventListener('click', () => {
+                handleDeleteItem(item.partNumber);
             });
 
             tableBody.appendChild(row);
         });
 
-        // Hitung total awal
-        recalculateGlobalTotals();
+        recalculateGlobals();
+        loadingRow.classList.add('hidden');
+        emptyState.classList.add('hidden');
         grandTotalSection.classList.remove('hidden');
     }
 
-    // --- INISIALISASI ---
+    function handleDeleteItem(partNumber) {
+        const confirmMsg = `Hapus "${partNumber}" dari daftar orderan?`;
+        if (confirm(confirmMsg)) {
+            delete currentAggregatedItems[partNumber];
+            renderTable();
+        } else {
+            // Kembalikan qty ke 1 jika user cancel hapus dari input 0
+            if(currentAggregatedItems[partNumber].qty === 0 || isNaN(currentAggregatedItems[partNumber].qty)) {
+                currentAggregatedItems[partNumber].qty = 1;
+            }
+            renderTable();
+        }
+    }
+
+    function recalculateGlobals() {
+        let subtotal = 0;
+        Object.values(currentAggregatedItems).forEach(item => {
+            if (item.priceFound) subtotal += (item.qty * item.price);
+        });
+
+        const ppn = subtotal * 0.11;
+        const total = subtotal + ppn;
+
+        document.getElementById('grand-subtotal').textContent = formatRupiah(subtotal);
+        document.getElementById('grand-ppn').textContent = formatRupiah(ppn);
+        document.getElementById('grand-total').textContent = formatRupiah(total);
+    }
+
     async function initialize() {
         try {
-            await fetchSparepartData(); // Ambil data master dulu
-            await fetchAndProcessOrders(); // Baru ambil dan proses orderan
-        } catch (error) {
-            // Tangkap error dari salah satu fungsi di atas dan tampilkan di tabel
-            let errorMessageHTML = `<td colspan="6" class="text-center py-8 text-red-600">${error.message}</td>`;
-            // Jika error karena sesi berakhir, tampilkan tombol login
-            if (error.message.includes('Sesi Anda telah berakhir') || error.message.includes('Could not validate credentials')) {
-                errorMessageHTML = `<td colspan="6" class="text-center py-8">
-                    <p class="font-bold text-gray-700">${error.message}</p>
-                    <a href="login.html" class="mt-4 inline-block bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600">Login Ulang</a>
-                </td>`;
-            }
-            loadingRow.innerHTML = errorMessageHTML;
+            await fetchSparepartData();
+            await fetchAndProcessOrders();
+        } catch (e) {
+            loadingRow.innerHTML = `<td colspan="7" class="text-center py-8 text-red-600">Gagal inisialisasi data.</td>`;
         }
     }
 
     initialize();
 
-    // Event listener untuk tombol Konfirmasi Pembayaran
-    if (confirmPaymentBtn) {
-        confirmPaymentBtn.addEventListener('click', function() {
-            try {
-                console.log("Tombol 'Konfirmasi Pembayaran' diklik.");
+    // Event Konfirmasi Pembayaran
+    confirmPaymentBtn.addEventListener('click', function() {
+        const totalText = document.getElementById('grand-total').textContent;
+        const totalAmount = parseFloat(totalText.replace(/[^0-9]/g, ''));
 
-                // 1. Ambil elemen total dengan aman
-                const totalElement = document.getElementById('grand-total');
-                if (!totalElement) {
-                    throw new Error("Elemen 'grand-total' tidak ditemukan di HTML.");
-                }
-                console.log("Langkah 1: Elemen total ditemukan.");
+        if (totalAmount <= 0) {
+            alert("Tidak ada item valid untuk dibayar.");
+            return;
+        }
 
-                // 2. Pengecekan data item
-                if (!currentAggregatedItems || Object.keys(currentAggregatedItems).length === 0) {
-                    throw new Error("Tidak ada data item untuk diproses.");
-                }
-                console.log("Langkah 2: Data item ditemukan.", currentAggregatedItems);
+        const itemsForStorage = {};
+        for (const key in currentAggregatedItems) {
+            itemsForStorage[key] = {
+                ...currentAggregatedItems[key],
+                orderIds: Array.from(currentAggregatedItems[key].orderIds)
+            };
+        }
 
-                // 3. Konversi total menjadi angka
-                const totalText = totalElement.textContent;
-                const totalAmount = parseFloat(totalText.replace(/[^0-9,]/g, '').replace(',', '.'));
-                if (isNaN(totalAmount)) {
-                    throw new Error(`Gagal mengonversi total "${totalText}" menjadi angka.`);
-                }
-                
-                // [FIX] Validasi total tidak boleh 0 atau negatif
-                if (totalAmount <= 0) {
-                    throw new Error("Total pembayaran Rp 0. Silakan masukkan jumlah item yang valid (minimal 1).");
-                }
-                console.log("Langkah 3: Total berhasil dikonversi menjadi angka:", totalAmount);
-
-                // 4. Siapkan data untuk halaman pembayaran
-                // [FIX] Konversi Set menjadi Array sebelum stringify
-                const itemsForStorage = {};
-                for (const key in currentAggregatedItems) {
-                    itemsForStorage[key] = {
-                        ...currentAggregatedItems[key],
-                        orderIds: Array.from(currentAggregatedItems[key].orderIds) // Ubah Set ke Array
-                    };
-                }
-                // [/FIX]
-
-                const paymentDetails = {
-                    total: totalAmount,
-                    // Gunakan objek yang sudah dikonversi
-                    items: itemsForStorage
-                };
-                console.log("Langkah 4: Data pembayaran siap.", paymentDetails);
-
-                // 5. Simpan ke localStorage dan arahkan halaman
-                localStorage.setItem('paymentDetails', JSON.stringify(paymentDetails));
-                console.log("Langkah 5: Data disimpan ke localStorage. Mengarahkan ke payment.html...");
-                window.location.href = 'payment.html';
-
-            } catch (error) {
-                // Jika ada error di langkah mana pun, tampilkan di console dan alert
-                console.error("GAGAL PINDAH HALAMAN:", error);
-                alert(`Terjadi kesalahan: ${error.message}\n\nSilakan periksa Console (F12) untuk detail teknis.`);
-            }
-        });
-    }
+        const paymentDetails = { total: totalAmount, items: itemsForStorage };
+        localStorage.setItem('paymentDetails', JSON.stringify(paymentDetails));
+        window.location.href = 'payment.html';
+    });
 });
